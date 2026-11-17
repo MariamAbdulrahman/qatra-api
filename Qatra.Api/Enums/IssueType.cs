@@ -1,6 +1,9 @@
-﻿namespace Qatra.Api.Enums
+﻿namespace Qatra.Api.Models.Enums;
+
+public enum IssueType
 {
-    public class IssueType
-    {
-    }
+    Outage,       
+    TankerDelay,   
+    Contaminated,  
+    Other        
 }

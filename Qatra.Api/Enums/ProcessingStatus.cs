@@ -1,6 +1,8 @@
-﻿namespace Qatra.Api.Enums
+﻿namespace Qatra.Api.Models.Enums;
+
+public enum ProcessingStatus
 {
-    public class ProcessingStatus
-    {
-    }
+    Pending,     
+    Processed,  
+    NeedsReview 
 }
