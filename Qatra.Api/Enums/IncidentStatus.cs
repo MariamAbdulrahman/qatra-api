@@ -1,6 +1,10 @@
-﻿namespace Qatra.Api.Enums
+﻿namespace Qatra.Api.Models.Enums;
+
+public enum IncidentStatus
 {
-    public class IncidentStatus
-    {
-    }
+    New,      
+    Confirmed, 
+    InProgress,
+    Resolved, 
+    Expired  
 }
