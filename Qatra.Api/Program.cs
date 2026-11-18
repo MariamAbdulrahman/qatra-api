@@ -39,6 +39,7 @@
 using Microsoft.EntityFrameworkCore;
 using Qatra.Api.Data;
 using Qatra.Api.Interfaces;
+using Qatra.Api.Options;
 using Qatra.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -52,7 +53,10 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddScoped<INeighborhoodService, NeighborhoodService>();
+builder.Services.Configure<ReportingOptions>(
+    builder.Configuration.GetSection(ReportingOptions.SectionName));
 
+builder.Services.AddScoped<IReportIngestionService, ReportIngestionService>();
 var app = builder.Build();
 
 // إدخال الأحياء الأولية (مرة واحدة فقط إن كان الجدول فارغًا)
