@@ -17,7 +17,7 @@ public class Report
 
     public string RawText { get; set; } = string.Empty;
 
-    public IssueType QuickButton { get; set; }
+    public IssueType? QuickButton { get; set; }
 
     public IssueType? IssueType { get; set; }
 
@@ -26,6 +26,8 @@ public class Report
     public DateTime? EventDate { get; set; }
 
     public bool WaterArrived { get; set; }
+
+    public bool NeedsFollowup { get; set; }
 
     public ProcessingStatus ProcessingStatus { get; set; } = ProcessingStatus.Pending;
 

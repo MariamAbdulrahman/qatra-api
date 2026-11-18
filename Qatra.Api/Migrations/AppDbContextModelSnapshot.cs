@@ -54,9 +54,6 @@ namespace Qatra.Api.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<DateTime?>("ActualArrivalDate")
-                        .HasColumnType("datetime2");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -84,10 +81,16 @@ namespace Qatra.Api.Migrations
                     b.Property<int>("NeighborhoodId")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
+
+                    b.Property<bool>("UrgentHealth")
+                        .HasColumnType("bit");
 
                     b.Property<bool?>("WasAbnormal")
                         .HasColumnType("bit");
@@ -107,10 +110,19 @@ namespace Qatra.Api.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("Name")
+                    b.Property<double>("Lat")
+                        .HasColumnType("float");
+
+                    b.Property<double>("Lng")
+                        .HasColumnType("float");
+
+                    b.Property<string>("NameAr")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("Population")
+                        .HasColumnType("int");
 
                     b.Property<double>("PriorCycleDays")
                         .HasColumnType("float");
@@ -120,47 +132,10 @@ namespace Qatra.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Name")
+                    b.HasIndex("NameAr")
                         .IsUnique();
 
                     b.ToTable("Neighborhoods");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            Name = "الديس",
-                            PriorCycleDays = 4.0,
-                            PriorCycleSd = 1.0
-                        },
-                        new
-                        {
-                            Id = 2,
-                            Name = "فوه",
-                            PriorCycleDays = 5.0,
-                            PriorCycleSd = 1.2
-                        },
-                        new
-                        {
-                            Id = 3,
-                            Name = "الشرج",
-                            PriorCycleDays = 7.0,
-                            PriorCycleSd = 1.5
-                        },
-                        new
-                        {
-                            Id = 4,
-                            Name = "روكب",
-                            PriorCycleDays = 9.0,
-                            PriorCycleSd = 2.0
-                        },
-                        new
-                        {
-                            Id = 5,
-                            Name = "السلام",
-                            PriorCycleDays = 6.0,
-                            PriorCycleSd = 1.5
-                        });
                 });
 
             modelBuilder.Entity("Qatra.Api.Models.Prediction", b =>
@@ -231,6 +206,9 @@ namespace Qatra.Api.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<bool>("NeedsFollowup")
+                        .HasColumnType("bit");
+
                     b.Property<int>("NeighborhoodId")
                         .HasColumnType("int");
 
@@ -240,7 +218,6 @@ namespace Qatra.Api.Migrations
                         .HasColumnType("nvarchar(20)");
 
                     b.Property<string>("QuickButton")
-                        .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
