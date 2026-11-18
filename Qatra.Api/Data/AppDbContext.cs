@@ -21,14 +21,13 @@ public class AppDbContext : DbContext
         // ---------- Neighborhoods ----------
         modelBuilder.Entity<Neighborhood>(e =>
         {
-            e.Property(x => x.Name).IsRequired().HasMaxLength(100);
-            e.HasIndex(x => x.Name).IsUnique();
+            e.Property(x => x.NameAr).IsRequired().HasMaxLength(100);
+            e.HasIndex(x => x.NameAr).IsUnique();
         });
 
         // ---------- Devices ----------
         modelBuilder.Entity<Device>(e =>
         {
-            // SHA256 بصيغة hex = 64 حرفاً
             e.Property(x => x.DeviceKeyHash).IsRequired().HasMaxLength(64);
             e.HasIndex(x => x.DeviceKeyHash).IsUnique();
         });
@@ -96,12 +95,5 @@ public class AppDbContext : DbContext
             e.HasIndex(x => new { x.NeighborhoodId, x.CreatedAt });
         });
 
-        modelBuilder.Entity<Neighborhood>().HasData(
-            new Neighborhood { Id = 1, Name = "الديس", PriorCycleDays = 4, PriorCycleSd = 1.0 },
-            new Neighborhood { Id = 2, Name = "فوه", PriorCycleDays = 5, PriorCycleSd = 1.2 },
-            new Neighborhood { Id = 3, Name = "الشرج", PriorCycleDays = 7, PriorCycleSd = 1.5 },
-            new Neighborhood { Id = 4, Name = "روكب", PriorCycleDays = 9, PriorCycleSd = 2.0 },
-            new Neighborhood { Id = 5, Name = "السلام", PriorCycleDays = 6, PriorCycleSd = 1.5 }
-        );
     }
 }

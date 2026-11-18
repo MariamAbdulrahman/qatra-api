@@ -19,14 +19,16 @@ public class Incident
 
     public bool IsRepeat { get; set; }
 
-    public string? Explanation { get; set; }
+    public bool UrgentHealth { get; set; }
 
-    public DateTime? ActualArrivalDate { get; set; }
+    public string? Explanation { get; set; }
 
     public bool? WasAbnormal { get; set; }
 
     public DateTime LastReportAt { get; set; } = DateTime.UtcNow;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public DateTime? ResolvedAt { get; set; }
 
     public ICollection<Report> Reports { get; set; } = new List<Report>();
 }
