@@ -41,15 +41,7 @@ public class ReportsController : ControllerBase
                 BadRequest(new ProblemDetails
                 {
                     Title = "قيمة الزر السريع غير صالحة",
-                    Detail = "القيم المسموحة: outage, tanker_delay, contaminated, other",
-                    Status = 400
-                }),
-
-            IngestionOutcome.EmptyReport =>
-                BadRequest(new ProblemDetails
-                {
-                    Title = "البلاغ فارغ",
-                    Detail = "أرسل نصاً أو زراً سريعاً أو WaterArrived = true",
+                    Detail = "القيم المسموحة: outage, contaminated",
                     Status = 400
                 }),
 

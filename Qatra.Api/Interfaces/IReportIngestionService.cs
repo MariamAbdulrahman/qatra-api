@@ -7,8 +7,7 @@ public enum IngestionOutcome
     Created,
     NeighborhoodNotFound,
     DailyLimitExceeded,
-    InvalidQuickButton,
-    EmptyReport
+    InvalidQuickButton
 }
 
 public enum FollowupOutcome

@@ -2,8 +2,6 @@
 
 public enum IssueType
 {
-    Outage,       
-    TankerDelay,   
-    Contaminated,  
-    Other        
+    Outage,        // انقطاع ماء
+    Contaminated   // تلوث ماء
 }

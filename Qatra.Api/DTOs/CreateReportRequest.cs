@@ -13,8 +13,7 @@ public class CreateReportRequest
     [StringLength(1000)]
     public string? Text { get; set; }
 
-    /// اختياري: outage أو tanker_delay أو contaminated أو other
+    /// إجباري: outage أو contaminated
+    [Required(ErrorMessage = "يجب اختيار نوع المشكلة (انقطاع ماء أو تلوث ماء).")]
     public string? QuickButton { get; set; }
-
-    public bool WaterArrived { get; set; }
 }
