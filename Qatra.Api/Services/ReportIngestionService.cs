@@ -25,20 +25,10 @@ public class ReportIngestionService : IReportIngestionService
 
     public async Task<IngestionResult> CreateAsync(CreateReportRequest request, CancellationToken ct = default)
     {
-        // 1) التحقق من المدخلات
-        var hasText = !string.IsNullOrWhiteSpace(request.Text);
-        var hasButton = !string.IsNullOrWhiteSpace(request.QuickButton);
-
-        if (!hasText && !hasButton && !request.WaterArrived)
-            return new IngestionResult(IngestionOutcome.EmptyReport);
-
-        IssueType? quickButton = null;
-        if (hasButton)
-        {
-            quickButton = IssueTypeMapper.Parse(request.QuickButton);
-            if (quickButton is null)
-                return new IngestionResult(IngestionOutcome.InvalidQuickButton);
-        }
+        // 1) التحقق من المدخلات: الزر السريع إجباري وله قيمتان فقط
+        var quickButton = IssueTypeMapper.Parse(request.QuickButton);
+        if (quickButton is null)
+            return new IngestionResult(IngestionOutcome.InvalidQuickButton);
 
         var neighborhoodExists = await _db.Neighborhoods
             .AnyAsync(n => n.Id == request.NeighborhoodId, ct);
@@ -63,8 +53,7 @@ public class ReportIngestionService : IReportIngestionService
             NeighborhoodId = request.NeighborhoodId,
             RawText = request.Text?.Trim() ?? string.Empty,
             QuickButton = quickButton,
-            WaterArrived = request.WaterArrived,
-            NeedsFollowup = !request.WaterArrived,
+            NeedsFollowup = true,
             ProcessingStatus = ProcessingStatus.Pending,
             CreatedAt = DateTime.UtcNow
         };
