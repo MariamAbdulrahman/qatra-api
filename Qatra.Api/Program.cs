@@ -3,6 +3,7 @@ using Qatra.Api.Data;
 using Qatra.Api.Interfaces;
 using Qatra.Api.Options;
 using Qatra.Api.Services;
+using Qatra.Api.Workers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,6 +15,13 @@ builder.Services.AddScoped<INeighborhoodService, NeighborhoodService>();
 builder.Services.Configure<ReportingOptions>(
     builder.Configuration.GetSection(ReportingOptions.SectionName));
 builder.Services.AddScoped<IReportIngestionService, ReportIngestionService>();
+builder.Services.Configure<IncidentsOptions>(
+    builder.Configuration.GetSection(IncidentsOptions.SectionName));
+builder.Services.AddScoped<IIncidentMergingService, IncidentMergingService>();
+builder.Services.Configure<RankingOptions>(
+    builder.Configuration.GetSection(RankingOptions.SectionName));
+builder.Services.AddScoped<IRankingAndWarningService, RankingAndWarningService>();
+builder.Services.AddHostedService<IncidentExpirationWorker>();
 
 builder.Services.AddHttpClient<IPredictionService, PredictionService>(c =>
 {
