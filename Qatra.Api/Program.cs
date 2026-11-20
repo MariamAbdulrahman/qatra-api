@@ -14,6 +14,9 @@ builder.Services.AddScoped<INeighborhoodService, NeighborhoodService>();
 builder.Services.Configure<ReportingOptions>(
     builder.Configuration.GetSection(ReportingOptions.SectionName));
 builder.Services.AddScoped<IReportIngestionService, ReportIngestionService>();
+builder.Services.Configure<IncidentsOptions>(
+    builder.Configuration.GetSection(IncidentsOptions.SectionName));
+builder.Services.AddScoped<IIncidentMergingService, IncidentMergingService>();
 
 builder.Services.AddHttpClient<IPredictionService, PredictionService>(c =>
 {
