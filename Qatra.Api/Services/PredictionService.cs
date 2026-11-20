@@ -9,9 +9,9 @@ namespace Qatra.Api.Services;
 
 public class PredictionService : IPredictionService
 {
-    private static readonly JsonSerializerOptions SnakeCase = new()
+    private static readonly JsonSerializerOptions JsonOpts = new()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
     private readonly HttpClient _http;
@@ -33,15 +33,14 @@ public class PredictionService : IPredictionService
         _cacheMinutes = config.GetValue("PredictionService:CacheMinutes", 30);
     }
 
-    // ==================================================================
-    //  عقد خدمة Python (افتراض!). عدّلي هذا الكلاس فقط إن اختلف الطلب
-    //  عمّا في https://qatra-ml-service.onrender.com/docs
-    // ==================================================================
+    // عقد خدمة Python حسب https://qatra-ml-service.onrender.com/docs
     private record MlRequest(
-        int NeighborhoodId,
-        double PriorCycleDays,
-        double PriorCycleSd,
-        List<double> IntervalsDays);   // فارغة حالياً: لا يوجد كشف لوصول الماء
+        double PriorMean,
+        double PriorSd,
+        List<double> Intervals,
+        double DaysSince,
+        int ActiveDevices,
+        int ReportsLast24h);
 
     public async Task<PredictionResult?> GetPredictionAsync(int neighborhoodId, CancellationToken ct = default)
     {
@@ -63,28 +62,44 @@ public class PredictionService : IPredictionService
         }
 
         // 2) من خدمة Python
-        var request = new MlRequest(hood.Id, hood.PriorCycleDays, hood.PriorCycleSd, new List<double>());
+        var since = DateTime.UtcNow.AddHours(-24);
+        var recent = _db.Reports.AsNoTracking()
+            .Where(r => r.NeighborhoodId == hood.Id && r.CreatedAt >= since);
+
+        var reportsLast24h = await recent.CountAsync(ct);
+        var activeDevices = await recent.Select(r => r.DeviceId).Distinct().CountAsync(ct);
+
+        var request = new MlRequest(
+            hood.PriorCycleDays,
+            hood.PriorCycleSd,
+            new List<double>(),   // لا يوجد كشف لوصول الماء حالياً
+            0,                    // daysSince: نفس السبب
+            activeDevices,
+            reportsLast24h);
 
         try
         {
-            using var response = await _http.PostAsJsonAsync(_predictPath, request, SnakeCase, ct);
+            using var response = await _http.PostAsJsonAsync(_predictPath, request, JsonOpts, ct);
             response.EnsureSuccessStatusCode();
 
             var raw = await response.Content.ReadAsStringAsync(ct);
             if (!TryParse(raw, out var details))
                 throw new JsonException("Empty or invalid JSON from prediction service.");
 
-            var version = details.ValueKind == JsonValueKind.Object
-                          && details.TryGetProperty("model_version", out var v)
-                          && v.ValueKind == JsonValueKind.String
-                ? v.GetString()!
-                : "unknown";
+            string version = "unknown";
+            if (details.ValueKind == JsonValueKind.Object)
+            {
+                if (details.TryGetProperty("modelVersion", out var v1) && v1.ValueKind == JsonValueKind.String)
+                    version = v1.GetString()!;
+                else if (details.TryGetProperty("model_version", out var v2) && v2.ValueKind == JsonValueKind.String)
+                    version = v2.GetString()!;
+            }
 
             var entity = new Prediction
             {
                 NeighborhoodId = hood.Id,
                 ModelVersion = version,
-                Inputs = JsonSerializer.Serialize(request, SnakeCase),
+                Inputs = JsonSerializer.Serialize(request, JsonOpts),
                 Outputs = raw,
                 CreatedAt = DateTime.UtcNow
             };
