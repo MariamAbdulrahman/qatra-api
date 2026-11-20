@@ -17,6 +17,9 @@ builder.Services.AddScoped<IReportIngestionService, ReportIngestionService>();
 builder.Services.Configure<IncidentsOptions>(
     builder.Configuration.GetSection(IncidentsOptions.SectionName));
 builder.Services.AddScoped<IIncidentMergingService, IncidentMergingService>();
+builder.Services.Configure<RankingOptions>(
+    builder.Configuration.GetSection(RankingOptions.SectionName));
+builder.Services.AddScoped<IRankingAndWarningService, RankingAndWarningService>();
 
 builder.Services.AddHttpClient<IPredictionService, PredictionService>(c =>
 {
