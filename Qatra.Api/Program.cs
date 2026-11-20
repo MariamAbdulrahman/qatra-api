@@ -14,6 +14,13 @@ builder.Services.AddScoped<INeighborhoodService, NeighborhoodService>();
 builder.Services.Configure<ReportingOptions>(
     builder.Configuration.GetSection(ReportingOptions.SectionName));
 builder.Services.AddScoped<IReportIngestionService, ReportIngestionService>();
+
+builder.Services.AddHttpClient<IPredictionService, PredictionService>(c =>
+{
+    c.BaseAddress = new Uri(builder.Configuration["PredictionService:BaseUrl"]!);
+    c.Timeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue("PredictionService:TimeoutSeconds", 20));
+});
 var app = builder.Build();
 
 // تشغيل الـ Seeder مرة واحدة (في كل البيئات، مع حماية من الأخطاء)
