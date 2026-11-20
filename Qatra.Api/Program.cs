@@ -21,10 +21,12 @@ builder.Services.AddHttpClient<IPredictionService, PredictionService>(c =>
     c.Timeout = TimeSpan.FromSeconds(
         builder.Configuration.GetValue("PredictionService:TimeoutSeconds", 20));
 });
-builder.Services.AddHttpClient<IAiExtractionService, AiExtractionService>(c =>
+builder.Services.AddHttpClient<IAiExplanationService, AiExplanationService>(c =>
 {
-    c.BaseAddress = new Uri(builder.Configuration["AiExtraction:BaseUrl"] ?? "https://api.anthropic.com");
-    c.Timeout = TimeSpan.FromSeconds(30);
+    c.BaseAddress = new Uri(builder.Configuration["AiExplanation:BaseUrl"]
+        ?? builder.Configuration["AiExtraction:BaseUrl"]!);
+    c.Timeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue("AiExplanation:TimeoutSeconds", 30));
 });
 var app = builder.Build();
 
