@@ -21,6 +21,11 @@ builder.Services.AddHttpClient<IPredictionService, PredictionService>(c =>
     c.Timeout = TimeSpan.FromSeconds(
         builder.Configuration.GetValue("PredictionService:TimeoutSeconds", 20));
 });
+builder.Services.AddHttpClient<IAiExtractionService, AiExtractionService>(c =>
+{
+    c.BaseAddress = new Uri(builder.Configuration["AiExtraction:BaseUrl"] ?? "https://api.anthropic.com");
+    c.Timeout = TimeSpan.FromSeconds(30);
+});
 var app = builder.Build();
 
 // تشغيل الـ Seeder مرة واحدة (في كل البيئات، مع حماية من الأخطاء)
