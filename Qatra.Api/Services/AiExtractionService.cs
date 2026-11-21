@@ -2,50 +2,60 @@
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Qatra.Api.Interfaces;
 using Qatra.Api.Models.Enums;
 
 namespace Qatra.Api.Services;
 
-public class AiExplanationService : IAiExplanationService
+public class AiExtractionService : IAiExtractionService
 {
     private const string SystemPrompt =
-        "أنت تكتب تبريراً قصيراً لمدير مؤسسة المياه عن حالة انقطاع أو تلوث في أحد الأحياء. " +
-        "اكتب جملتين فقط بالعربية الفصحى المبسطة: الأولى تشرح سبب أولوية الحي بحسب المعطيات، والثانية تلخص التنبؤ. " +
-        "استخدم فقط المعلومات والأرقام الواردة في المعطيات، ولا تضف رقماً أو سبباً أو توصية من عندك. " +
-        "إن لم يتوفر تنبؤ فقل ذلك في الجملة الثانية. " +
-        "إن ذكرت المعطيات أن التنبؤ مبني على الدورة المسبقة فقط فاذكر أنه تقدير تقريبي. " +
-        "اكتب الأرقام بالأرقام الغربية (0-9). لا تستخدم عناوين ولا قوائم ولا علامات تنسيق.";
-
-    private static readonly Regex NumberRx = new(@"\d+(?:\.\d+)?", RegexOptions.Compiled);
+        "أنت تستخرج بيانات من بلاغ مواطن عن المياه في مدينة يمنية، وقد يكتب باللهجة المحلية. " +
+        "أرجع كائن JSON واحداً فقط بدون أي نص آخر وبدون علامات تنسيق، بهذه الحقول: " +
+        "issueType: القيمة \"outage\" إذا كان البلاغ عن انقطاع المياه أو عدم وصولها أو فراغ الخزان، " +
+        "والقيمة \"contaminated\" إذا كان عن تلوث المياه (لون أو رائحة أو طعم أو شوائب)، " +
+        "والقيمة null إذا لم يكن البلاغ عن المياه أصلاً. " +
+        "durationDays: عدد الأيام المبلَّغ عنها كعدد صحيح، والقيمة 0 إذا بدأت المشكلة اليوم (مثل «من الصبح»)، " +
+        "والقيمة 1 إذا بدأت أمس، والقيمة null إذا لم تُذكر مدة. " +
+        "eventDate: تاريخ بدء المشكلة بصيغة YYYY-MM-DD محسوباً من تاريخ اليوم المعطى لك، " +
+        "والقيمة null إن لم يمكن تحديده. " +
+        "confidence: رقم بين 0 و1 يعبّر عن ثقتك في التصنيف. " +
+        "لا تخمّن اسم الحي ولا تضف حقولاً أخرى.";
 
     private readonly HttpClient _http;
-    private readonly ILogger<AiExplanationService> _logger;
+    private readonly ILogger<AiExtractionService> _logger;
     private readonly string _model;
     private readonly string _apiKey;
 
-    public AiExplanationService(HttpClient http, IConfiguration config, ILogger<AiExplanationService> logger)
+    public AiExtractionService(HttpClient http, IConfiguration config, ILogger<AiExtractionService> logger)
     {
         _http = http;
         _logger = logger;
-        _model = config["AiExplanation:Model"] ?? config["AiExtraction:Model"] ?? "";
-        // نفس مفتاح الاستخراج من User Secrets ما لم تضعي مفتاحاً خاصاً
-        _apiKey = config["AiExplanation:ApiKey"] ?? config["AiExtraction:ApiKey"] ?? "";
+        _model = config["AiExtraction:Model"] ?? "";
+        _apiKey = config["AiExtraction:ApiKey"] ?? "";
     }
 
-    public async Task<ExplanationResult> ExplainAsync(ExplanationInput input, CancellationToken ct = default)
+    public async Task<ExtractionResult> ExtractAsync(string rawText, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(_apiKey) || string.IsNullOrWhiteSpace(_model))
-            return Fallback(input, "Missing ApiKey or Model.");
+        if (string.IsNullOrWhiteSpace(rawText))
+            return ExtractionResult.Fail("Empty text.");
 
-        var prompt = BuildPrompt(input);
+        if (string.IsNullOrWhiteSpace(_apiKey) || string.IsNullOrWhiteSpace(_model))
+            return ExtractionResult.Fail("Missing AiExtraction ApiKey or Model.");
+
+        var today = DateTime.UtcNow.Date;
+        var userText = $"تاريخ اليوم: {today:yyyy-MM-dd}\nنص البلاغ: {rawText.Trim()}";
 
         var body = new
         {
             systemInstruction = new { parts = new[] { new { text = SystemPrompt } } },
-            contents = new[] { new { role = "user", parts = new[] { new { text = prompt } } } },
-            generationConfig = new { temperature = 0.2, maxOutputTokens = 1024 }
+            contents = new[] { new { role = "user", parts = new[] { new { text = userText } } } },
+            generationConfig = new
+            {
+                temperature = 0.0,
+                maxOutputTokens = 1024,
+                responseMimeType = "application/json"
+            }
         };
 
         try
@@ -57,74 +67,37 @@ public class AiExplanationService : IAiExplanationService
             req.Headers.Add("x-goog-api-key", _apiKey);
 
             using var resp = await _http.SendAsync(req, ct);
+            var status = (int)resp.StatusCode;
+
             if (!resp.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Explanation request returned {Status}.", (int)resp.StatusCode);
-                return Fallback(input, $"HTTP {(int)resp.StatusCode}");
+                // مؤقت: حد الطلبات أو مهلة أو خطأ في الخادم
+                var retryable = status == 429 || status == 408 || status >= 500;
+                _logger.LogWarning("Extraction request returned {Status}.", status);
+                return ExtractionResult.Fail($"HTTP {status}", retryable);
             }
 
             var raw = await resp.Content.ReadAsStringAsync(ct);
             var text = ExtractText(raw);
             if (text is null)
-                return Fallback(input, "Empty or invalid model response.");
+                return ExtractionResult.Fail("Empty or invalid model response.");
 
-            text = Clean(text);
-            if (text.Length < 20 || text.Length > 600)
-                return Fallback(input, "Unexpected response length.");
-
-            if (!NumbersAreGrounded(text, prompt))
-                return Fallback(input, "Model used a number that is not in the input.");
-
-            return new ExplanationResult(text, true, null);
+            return Parse(text, today);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested &&
-                                   ex is HttpRequestException or TaskCanceledException or JsonException)
+                                   ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogWarning(ex, "Explanation request failed.");
-            return Fallback(input, "Network error or timeout.");
+            _logger.LogWarning(ex, "Extraction request failed.");
+            return ExtractionResult.Fail("Network error or timeout.", retryable: true);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Extraction response was not valid JSON.");
+            return ExtractionResult.Fail("Invalid JSON from model.");
         }
     }
 
-    // ---------------------------------------------------------------- المعطيات
-    private static string BuildPrompt(ExplanationInput i)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine($"الحي: {i.NeighborhoodNameAr}");
-        sb.AppendLine($"نوع المشكلة: {IssueLabel(i.IssueType)}");
-        sb.AppendLine($"عدد الأجهزة المبلِّغة: {i.DistinctDevices}");
-        if (i.MaxDurationDays is not null)
-            sb.AppendLine($"أطول مدة مبلَّغ عنها بالأيام: {i.MaxDurationDays}");
-        if (i.Rank is not null)
-            sb.AppendLine($"ترتيب الحي بين الأحياء: {i.Rank}");
-        sb.AppendLine($"حالة متكررة: {(i.IsRepeat ? "نعم" : "لا")}");
-        sb.AppendLine($"خطر صحي عاجل: {(i.UrgentHealth ? "نعم" : "لا")}");
-
-        if (i.CycleMean is null)
-        {
-            sb.AppendLine("التنبؤ: غير متوفر");
-        }
-        else
-        {
-            sb.AppendLine($"دورة المياه المتوقعة بالأيام: {Fmt(i.CycleMean.Value)}");
-            if (i.ProbArrival2d is not null)
-                sb.AppendLine($"احتمال وصول الماء خلال يومين بالمئة: {Math.Round(i.ProbArrival2d.Value * 100)}");
-            if (i.AbnormalDelay is not null)
-                sb.AppendLine($"تأخر غير معتاد: {(i.AbnormalDelay.Value ? "نعم" : "لا")}");
-            if (IsPriorOnly(i.PredictionBasis))
-                sb.AppendLine("أساس التنبؤ: الدورة المسبقة للحي فقط، دون ملاحظات فعلية");
-        }
-        return sb.ToString();
-    }
-
-    private static string IssueLabel(IssueType t) =>
-        t == IssueType.Contaminated ? "تلوث المياه" : "انقطاع المياه";
-
-    private static bool IsPriorOnly(string? basis) =>
-        basis?.Contains("prior only", StringComparison.OrdinalIgnoreCase) == true;
-
-    private static string Fmt(double d) => d.ToString("0.#", CultureInfo.InvariantCulture);
-
-    // ---------------------------------------------------------------- الرد
+    // ---------------------------------------------------------------- قراءة رد Gemini
     private static string? ExtractText(string raw)
     {
         using var doc = JsonDocument.Parse(raw);
@@ -149,57 +122,50 @@ public class AiExplanationService : IAiExplanationService
         return s.Length == 0 ? null : s;
     }
 
-    private static string Clean(string s) =>
-        s.Replace("*", "").Replace("#", "").Replace("`", "").Trim();
-
-    /// <summary>كل رقم في نص النموذج يجب أن يكون موجوداً في المعطيات.</summary>
-    private static bool NumbersAreGrounded(string output, string prompt)
+    // ---------------------------------------------------------------- تحليل JSON الاستخراج
+    private static ExtractionResult Parse(string text, DateTime today)
     {
-        var allowed = NumberRx.Matches(Normalize(prompt))
-            .Select(m => double.Parse(m.Value, CultureInfo.InvariantCulture))
-            .ToList();
+        // إزالة أسوار ```json إن أضافها النموذج
+        text = text.Replace("```json", "").Replace("```", "").Trim();
 
-        foreach (Match m in NumberRx.Matches(Normalize(output)))
+        using var doc = JsonDocument.Parse(text);
+        var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+            return ExtractionResult.Fail("Model response is not a JSON object.");
+
+        // 1) النوع: outage أو contaminated فقط
+        if (!root.TryGetProperty("issueType", out var typeEl) || typeEl.ValueKind != JsonValueKind.String)
+            return ExtractionResult.Fail("Message is not a water report.");
+
+        var typeStr = typeEl.GetString()?.Trim();
+        if (!Enum.TryParse<IssueType>(typeStr, ignoreCase: true, out var issueType) ||
+            !Enum.IsDefined(typeof(IssueType), issueType) ||
+            !(string.Equals(typeStr, "outage", StringComparison.OrdinalIgnoreCase) ||
+              string.Equals(typeStr, "contaminated", StringComparison.OrdinalIgnoreCase)))
+            return ExtractionResult.Fail($"Unsupported issue type: {typeStr}");
+
+        // 2) المدة
+        int? duration = null;
+        if (root.TryGetProperty("durationDays", out var durEl) && durEl.ValueKind == JsonValueKind.Number)
         {
-            var v = double.Parse(m.Value, CultureInfo.InvariantCulture);
-            if (!allowed.Any(a => Math.Abs(a - v) < 1e-9)) return false;
-        }
-        return true;
-    }
-
-    private static string Normalize(string s)
-    {
-        var sb = new StringBuilder(s.Length);
-        foreach (var ch in s)
-            sb.Append(ch is >= '\u0660' and <= '\u0669' ? (char)('0' + (ch - '\u0660')) :
-                      ch == '\u066B' ? '.' : ch);
-        return sb.ToString();
-    }
-
-    // ---------------------------------------------------------------- القالب الاحتياطي
-    private static ExplanationResult Fallback(ExplanationInput i, string error)
-    {
-        var s1 = $"حالة {IssueLabel(i.IssueType)} في حي {i.NeighborhoodNameAr}، عدد الأجهزة المبلِّغة {i.DistinctDevices}";
-        if (i.MaxDurationDays is > 0) s1 += $"، وأطول مدة مبلَّغ عنها {i.MaxDurationDays} يوم";
-        if (i.IsRepeat) s1 += "، وهي حالة متكررة";
-        if (i.UrgentHealth) s1 += "، وفيها خطر صحي عاجل";
-        s1 += ".";
-
-        string s2;
-        if (i.CycleMean is null)
-        {
-            s2 = "لا يتوفر تنبؤ لهذا الحي حالياً.";
-        }
-        else
-        {
-            s2 = $"يقدَّر أن دورة المياه في الحي نحو {Fmt(i.CycleMean.Value)} يوم";
-            if (i.ProbArrival2d is not null)
-                s2 += $"، واحتمال وصول الماء خلال يومين {Math.Round(i.ProbArrival2d.Value * 100)}%";
-            if (i.AbnormalDelay == true) s2 += "، مع تأخر غير معتاد";
-            if (IsPriorOnly(i.PredictionBasis)) s2 += "، وهو تقدير تقريبي مبني على الدورة المسبقة للحي";
-            s2 += ".";
+            var d = (int)Math.Round(durEl.GetDouble());
+            duration = Math.Clamp(d, 0, 365);
         }
 
-        return new ExplanationResult($"{s1} {s2}", false, error);
+        // 3) التاريخ (لا نقبل تاريخاً بعد اليوم)
+        DateTime? eventDate = null;
+        if (root.TryGetProperty("eventDate", out var dateEl) && dateEl.ValueKind == JsonValueKind.String &&
+            DateTime.TryParse(dateEl.GetString(), CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed))
+        {
+            eventDate = parsed.Date > today ? today : parsed.Date;
+        }
+
+        // 4) الثقة
+        double confidence = 0;
+        if (root.TryGetProperty("confidence", out var confEl) && confEl.ValueKind == JsonValueKind.Number)
+            confidence = Math.Clamp(confEl.GetDouble(), 0, 1);
+
+        return ExtractionResult.Ok(issueType, duration, eventDate, confidence);
     }
 }
