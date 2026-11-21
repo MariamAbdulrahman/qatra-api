@@ -111,15 +111,15 @@ public class AiExtractionService : IAiExtractionService
             return null;
 
         var sb = new StringBuilder();
-        foreach (var p in parts.EnumerateArray())
+        foreach (var part in parts.EnumerateArray())
         {
-            // نتجاهل أجزاء «التفكير» إن وُجدت
-            if (p.TryGetProperty("thought", out var th) && th.ValueKind == JsonValueKind.True) continue;
-            if (p.TryGetProperty("text", out var t) && t.ValueKind == JsonValueKind.String)
-                sb.Append(t.GetString());
+            if (part.TryGetProperty("thought", out var thought) && thought.ValueKind == JsonValueKind.True)
+                continue;
+            if (part.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                sb.Append(text.GetString());
         }
-        var s = sb.ToString().Trim();
-        return s.Length == 0 ? null : s;
+
+        return sb.ToString().Trim();
     }
 
     // ---------------------------------------------------------------- تحليل JSON الاستخراج

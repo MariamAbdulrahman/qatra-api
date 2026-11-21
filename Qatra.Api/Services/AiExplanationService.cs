@@ -29,9 +29,12 @@ public class AiExplanationService : IAiExplanationService
     {
         _http = http;
         _logger = logger;
-        _model = config["AiExplanation:Model"] ?? config["AiExtraction:Model"] ?? "";
-        // نفس مفتاح الاستخراج من User Secrets ما لم تضعي مفتاحاً خاصاً
-        _apiKey = config["AiExplanation:ApiKey"] ?? config["AiExtraction:ApiKey"] ?? "";
+        _model = config["AiExplanation:Model"]
+                 ?? config["AiExtraction:Model"]
+                 ?? "gemini-3.5-flash-lite";
+        _apiKey = config["AiExplanation:ApiKey"]
+                  ?? config["AiExtraction:ApiKey"]
+                  ?? "";
     }
 
     public async Task<ExplanationResult> ExplainAsync(ExplanationInput input, CancellationToken ct = default)
