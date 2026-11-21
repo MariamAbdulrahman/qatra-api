@@ -22,7 +22,8 @@ builder.Services.Configure<RankingOptions>(
     builder.Configuration.GetSection(RankingOptions.SectionName));
 builder.Services.AddScoped<IRankingAndWarningService, RankingAndWarningService>();
 builder.Services.AddHostedService<IncidentExpirationWorker>();
-
+builder.Services.AddScoped<IIncidentMergingService, IncidentMergingService>();
+builder.Services.AddHostedService<ReportProcessingWorker>();
 builder.Services.AddHttpClient<IPredictionService, PredictionService>(c =>
 {
     c.BaseAddress = new Uri(builder.Configuration["PredictionService:BaseUrl"]!);
