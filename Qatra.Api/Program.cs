@@ -30,13 +30,29 @@ builder.Services.AddHttpClient<IPredictionService, PredictionService>(c =>
     c.Timeout = TimeSpan.FromSeconds(
         builder.Configuration.GetValue("PredictionService:TimeoutSeconds", 20));
 });
-builder.Services.AddHttpClient<IAiExplanationService, AiExplanationService>(c =>
+// builder.Services.AddHttpClient<IAiExplanationService, AiExplanationService>(c =>
+// {
+//     c.BaseAddress = new Uri(builder.Configuration["AiExplanation:BaseUrl"]
+//         ?? builder.Configuration["AiExtraction:BaseUrl"]!);
+//     c.Timeout = TimeSpan.FromSeconds(
+//         builder.Configuration.GetValue("AiExplanation:TimeoutSeconds", 30));
+// });
+
+builder.Services.AddHttpClient<IAiExplanationService, AiExplanationService>((c, sp) =>
 {
-    c.BaseAddress = new Uri(builder.Configuration["AiExplanation:BaseUrl"]
-        ?? builder.Configuration["AiExtraction:BaseUrl"]!);
+    var config = sp.GetRequiredService<IConfiguration>();
+    var url = config["AiExplanation:BaseUrl"]
+              ?? config["AiExtraction:BaseUrl"]
+              ?? "https://generativelanguage.googleapis.com";
+    c.BaseAddress = new Uri(url);
     c.Timeout = TimeSpan.FromSeconds(
-        builder.Configuration.GetValue("AiExplanation:TimeoutSeconds", 30));
+        config.GetValue("AiExplanation:TimeoutSeconds", 30));
+    return new AiExplanationService(
+        c,
+        config,
+        sp.GetRequiredService<ILogger<AiExplanationService>>());
 });
+
 var app = builder.Build();
 
 // تشغيل الـ Seeder مرة واحدة (في كل البيئات، مع حماية من الأخطاء)
