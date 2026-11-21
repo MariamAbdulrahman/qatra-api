@@ -3,14 +3,16 @@ using Qatra.Api.Interfaces;
 
 namespace Qatra.Api.Controllers;
 
+public record ExtractRequest(string Text);
+
 [ApiController]
-[Route("api/dev/explain")]
-public class DevExplainController : ControllerBase
+[Route("api/dev/extract")]
+public class DevExtractionController : ControllerBase
 {
-    private readonly IAiExplanationService _svc;
-    public DevExplainController(IAiExplanationService svc) => _svc = svc;
+    private readonly IAiExtractionService _svc;
+    public DevExtractionController(IAiExtractionService svc) => _svc = svc;
 
     [HttpPost]
-    public async Task<IActionResult> Post([FromBody] ExplanationInput input, CancellationToken ct)
-        => Ok(await _svc.ExplainAsync(input, ct));
+    public async Task<IActionResult> Post([FromBody] ExtractRequest request, CancellationToken ct)
+        => Ok(await _svc.ExtractAsync(request.Text, ct));
 }
