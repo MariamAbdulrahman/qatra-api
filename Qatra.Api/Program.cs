@@ -38,6 +38,13 @@ builder.Services.AddHttpClient<IAiExplanationService, AiExplanationService>(c =>
     c.Timeout = TimeSpan.FromSeconds(
         builder.Configuration.GetValue("AiExplanation:TimeoutSeconds", 30));
 });
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowDashboard", policy =>
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod());
+});
 
 builder.Services.AddScoped<IIncidentMergingService, IncidentMergingService>();
 builder.Services.AddHttpClient<IPredictionService, PredictionService>(c =>
@@ -92,8 +99,8 @@ app.UseSwaggerUI(options =>
 });
 
 // احذف HttpsRedirection إن سبّب مشاكل في الاستضافة
-// app.UseHttpsRedirection();
-
+ app.UseHttpsRedirection();
+app.UseCors("AllowDashboard");
 app.UseAuthorization();
 app.MapControllers();
 app.Run();
