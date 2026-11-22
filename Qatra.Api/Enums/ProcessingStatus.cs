@@ -4,5 +4,6 @@ public enum ProcessingStatus
 {
     Pending,     
     Processed,  
-    NeedsReview 
+    NeedsReview ,
+    Failed
 }

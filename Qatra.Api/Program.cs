@@ -22,13 +22,15 @@ builder.Services.Configure<RankingOptions>(
     builder.Configuration.GetSection(RankingOptions.SectionName));
 builder.Services.AddScoped<IRankingAndWarningService, RankingAndWarningService>();
 builder.Services.AddHostedService<IncidentExpirationWorker>();
-
-builder.Services.AddHttpClient<IPredictionService, PredictionService>(c =>
+builder.Services.AddScoped<IIncidentMergingService, IncidentMergingService>();
+builder.Services.AddHostedService<ReportProcessingWorker>();
+builder.Services.AddHttpClient<IAiExtractionService, AiExtractionService>(c =>
 {
-    c.BaseAddress = new Uri(builder.Configuration["PredictionService:BaseUrl"]!);
+    c.BaseAddress = new Uri(builder.Configuration["AiExtraction:BaseUrl"]!);
     c.Timeout = TimeSpan.FromSeconds(
-        builder.Configuration.GetValue("PredictionService:TimeoutSeconds", 20));
+        builder.Configuration.GetValue("AiExtraction:TimeoutSeconds", 30));
 });
+
 builder.Services.AddHttpClient<IAiExplanationService, AiExplanationService>(c =>
 {
     c.BaseAddress = new Uri(builder.Configuration["AiExplanation:BaseUrl"]
@@ -43,6 +45,37 @@ builder.Services.AddCors(options =>
               .AllowAnyHeader()
               .AllowAnyMethod());
 });
+
+builder.Services.AddScoped<IIncidentMergingService, IncidentMergingService>();
+builder.Services.AddHttpClient<IPredictionService, PredictionService>(c =>
+{
+    c.BaseAddress = new Uri(builder.Configuration["PredictionService:BaseUrl"]!);
+    c.Timeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue("PredictionService:TimeoutSeconds", 20));
+});
+// builder.Services.AddHttpClient<IAiExplanationService, AiExplanationService>(c =>
+// {
+//     c.BaseAddress = new Uri(builder.Configuration["AiExplanation:BaseUrl"]
+//         ?? builder.Configuration["AiExtraction:BaseUrl"]!);
+//     c.Timeout = TimeSpan.FromSeconds(
+//         builder.Configuration.GetValue("AiExplanation:TimeoutSeconds", 30));
+// });
+
+builder.Services.AddHttpClient<IAiExplanationService, AiExplanationService>((c, sp) =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    var url = config["AiExplanation:BaseUrl"]
+              ?? config["AiExtraction:BaseUrl"]
+              ?? "https://generativelanguage.googleapis.com";
+    c.BaseAddress = new Uri(url);
+    c.Timeout = TimeSpan.FromSeconds(
+        config.GetValue("AiExplanation:TimeoutSeconds", 30));
+    return new AiExplanationService(
+        c,
+        config,
+        sp.GetRequiredService<ILogger<AiExplanationService>>());
+});
+
 var app = builder.Build();
 
 // تشغيل الـ Seeder مرة واحدة (في كل البيئات، مع حماية من الأخطاء)
