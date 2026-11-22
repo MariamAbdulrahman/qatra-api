@@ -36,6 +36,13 @@ builder.Services.AddHttpClient<IAiExplanationService, AiExplanationService>(c =>
     c.Timeout = TimeSpan.FromSeconds(
         builder.Configuration.GetValue("AiExplanation:TimeoutSeconds", 30));
 });
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowDashboard", policy =>
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod());
+});
 var app = builder.Build();
 
 // تشغيل الـ Seeder مرة واحدة (في كل البيئات، مع حماية من الأخطاء)
@@ -59,8 +66,8 @@ app.UseSwaggerUI(options =>
 });
 
 // احذف HttpsRedirection إن سبّب مشاكل في الاستضافة
-// app.UseHttpsRedirection();
-
+ app.UseHttpsRedirection();
+app.UseCors("AllowDashboard");
 app.UseAuthorization();
 app.MapControllers();
 app.Run();
