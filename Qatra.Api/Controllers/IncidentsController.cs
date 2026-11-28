@@ -62,7 +62,21 @@ public class IncidentsController : ControllerBase
         incident.Status = request.Status;
 
         if (request.Status == IncidentStatus.Resolved && incident.ResolvedAt is null)
-            incident.ResolvedAt = DateTime.UtcNow;
+        {
+            var resolvedUtc = DateTime.UtcNow;
+            incident.ResolvedAt = resolvedUtc;
+
+            // تسجيل حدث وصول الماء عند حل حادثة انقطاع ليبدأ نموذج التنبؤ بتعلّم الفواصل الفعلية
+            if (incident.IssueType == IssueType.Outage)
+            {
+                _db.WaterSupplyEvents.Add(new Models.WaterSupplyEvent
+                {
+                    NeighborhoodId = incident.NeighborhoodId,
+                    EventDate = resolvedUtc,
+                    ReportCount = Math.Max(1, incident.DistinctDevices)
+                });
+            }
+        }
 
         await _db.SaveChangesAsync(ct);
         return NoContent();

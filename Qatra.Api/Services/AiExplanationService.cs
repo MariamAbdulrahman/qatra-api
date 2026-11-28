@@ -11,11 +11,10 @@ namespace Qatra.Api.Services;
 public class AiExplanationService : IAiExplanationService
 {
     private const string SystemPrompt =
-        "أنت تكتب تبريراً قصيراً لمدير مؤسسة المياه عن حالة انقطاع أو تلوث في أحد الأحياء. " +
-        "اكتب جملتين فقط بالعربية الفصحى المبسطة: الأولى تشرح سبب أولوية الحي بحسب المعطيات، والثانية تلخص التنبؤ. " +
-        "استخدم فقط المعلومات والأرقام الواردة في المعطيات، ولا تضف رقماً أو سبباً أو توصية من عندك. " +
-        "إن لم يتوفر تنبؤ فقل ذلك في الجملة الثانية. " +
-        "إن ذكرت المعطيات أن التنبؤ مبني على الدورة المسبقة فقط فاذكر أنه تقدير تقريبي. " +
+        "أنت تكتب تبريراً تشغيلياً مختصراً لمدير مؤسسة المياه لتبرير ترتيب أولوية حي معيّن. " +
+        "اكتب جملتين فقط بالعربية الفصحى المبسطة والسليمة نحوياً: الأولى تفسّر لماذا يحتل هذا الحي ترتيبه الحالي بناءً على المعطيات (مثل التلوث العاجل أو استمرار الانقطاع أو عدد المبلّغين)، والثانية تبيّن الخلاصة العملية من التنبؤ (هل هناك تأخر غير معتاد يُرجّح عطلاً أم أن الدورة طبيعية). " +
+        "استخدم فقط المعلومات والأرقام الواردة في المعطيات، ولا تخترع رقماً أو سبباً من عندك. " +
+        "إن لم يتوفر تنبؤ أو كان مبنياً على الدورة المسبقة فقط فاذكر ذلك بإيجاز. " +
         "اكتب الأرقام بالأرقام الغربية (0-9). لا تستخدم عناوين ولا قوائم ولا علامات تنسيق.";
 
     private static readonly Regex NumberRx = new(@"\d+(?:\.\d+)?", RegexOptions.Compiled);
@@ -31,7 +30,7 @@ public class AiExplanationService : IAiExplanationService
         _logger = logger;
         _model = config["AiExplanation:Model"]
                  ?? config["AiExtraction:Model"]
-                 ?? "gemini-3.5-flash-lite";
+                 ?? "gemini-2.5-flash-lite";
         _apiKey = config["AiExplanation:ApiKey"]
                   ?? config["AiExtraction:ApiKey"]
                   ?? "";
@@ -182,27 +181,51 @@ public class AiExplanationService : IAiExplanationService
     // ---------------------------------------------------------------- القالب الاحتياطي
     private static ExplanationResult Fallback(ExplanationInput i, string error)
     {
-        var s1 = $"حالة {IssueLabel(i.IssueType)} في حي {i.NeighborhoodNameAr}، عدد الأجهزة المبلِّغة {i.DistinctDevices}";
-        if (i.MaxDurationDays is > 0) s1 += $"، وأطول مدة مبلَّغ عنها {i.MaxDurationDays} يوم";
+        var s1 = i.UrgentHealth
+            ? $"تصدّر حي {i.NeighborhoodNameAr} الأولوية وفق القاعدة الذهبية لوجود بلاغات تلوث مياه من {FormatDevices(i.DistinctDevices)}"
+            : $"يحتل حي {i.NeighborhoodNameAr} المرتبة {i.Rank?.ToString(CultureInfo.InvariantCulture) ?? "الحالية"} بسبب {IssueLabel(i.IssueType)} أبلغ عنه {FormatDevices(i.DistinctDevices)}";
+
+        if (i.MaxDurationDays is > 0) s1 += $" بمدة انقطاع تصل إلى {FormatDays(i.MaxDurationDays.Value)}";
         if (i.IsRepeat) s1 += "، وهي حالة متكررة";
-        if (i.UrgentHealth) s1 += "، وفيها خطر صحي عاجل";
         s1 += ".";
 
         string s2;
         if (i.CycleMean is null)
         {
-            s2 = "لا يتوفر تنبؤ لهذا الحي حالياً.";
+            s2 = "لا يتوفر تنبؤ لدورة الضخ في هذا الحي حالياً.";
+        }
+        else if (i.AbnormalDelay == true)
+        {
+            s2 = $"تجاوزت مدة الانقطاع الدورة المعتادة للحي ({Fmt(i.CycleMean.Value)} يوم) مما يُرجّح وجود عطل في الشبكة.";
+        }
+        else if (IsPriorOnly(i.PredictionBasis))
+        {
+            s2 = $"الدورة المبدئية المتوقعة للحي نحو {Fmt(i.CycleMean.Value)} يوم، ولا توجد ملاحظات تاريخية كافية بعد للحكم القاطع على التأخر.";
         }
         else
         {
-            s2 = $"يقدَّر أن دورة المياه في الحي نحو {Fmt(i.CycleMean.Value)} يوم";
+            s2 = $"الدورة ضمن النطاق المعتاد للحي (نحو {Fmt(i.CycleMean.Value)} يوم)";
             if (i.ProbArrival2d is not null)
-                s2 += $"، واحتمال وصول الماء خلال يومين {Math.Round(i.ProbArrival2d.Value * 100)}%";
-            if (i.AbnormalDelay == true) s2 += "، مع تأخر غير معتاد";
-            if (IsPriorOnly(i.PredictionBasis)) s2 += "، وهو تقدير تقريبي مبني على الدورة المسبقة للحي";
+                s2 += $" باحتمال وصول خلال يومين يبلغ {Math.Round(i.ProbArrival2d.Value * 100)}%";
             s2 += ".";
         }
 
         return new ExplanationResult($"{s1} {s2}", false, error);
     }
+
+    private static string FormatDays(int days) => days switch
+    {
+        1 => "يوم واحد",
+        2 => "يومين",
+        >= 3 and <= 10 => $"{days} أيام",
+        _ => $"{days} يوماً"
+    };
+
+    private static string FormatDevices(int count) => count switch
+    {
+        1 => "جهاز واحد",
+        2 => "جهازين",
+        >= 3 and <= 10 => $"{count} أجهزة",
+        _ => $"{count} جهازاً"
+    };
 }

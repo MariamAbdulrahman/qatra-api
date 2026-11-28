@@ -2,7 +2,15 @@ using Qatra.Api.Models.Enums;
 
 namespace Qatra.Api.Interfaces;
 
-/// <summary>نتيجة ترتيب حادثة واحدة مع درجتها وتفسيرها.</summary>
+/// <summary>ملخص بلاغ مرتبط بحادثة لعرضه في لوحة التحكم.</summary>
+public record IncidentReportDto(
+    int Id,
+    string RawText,
+    IssueType? IssueType,
+    int? DurationDays,
+    DateTime CreatedAt);
+
+/// <summary>نتيجة ترتيب حادثة واحدة مع درجتها وتفسيرها وبلاغاتها المرتبطة.</summary>
 public record RankedIncident(
     int IncidentId,
     int NeighborhoodId,
@@ -19,10 +27,11 @@ public record RankedIncident(
     int Rank,
     string Explanation,
     bool ExplanationFromModel,
-    PredictionResult? Prediction);
+    PredictionResult? Prediction,
+    List<IncidentReportDto> Reports);
 
 public interface IRankingAndWarningService
 {
-    /// <summary>يُرجع الحوادث المفتوحة مرتّبةً تنازلياً بالدرجة مع التفسير والتنبؤ.</summary>
+    /// <summary>يُرجع الحوادث المفتوحة مرتّبةً بالقاعدة الذهبية ثم الدرجة مع التفسير والتنبؤ والبلاغات.</summary>
     Task<List<RankedIncident>> GetRankedIncidentsAsync(CancellationToken ct = default);
 }

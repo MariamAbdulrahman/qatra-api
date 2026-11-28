@@ -22,7 +22,6 @@ builder.Services.Configure<RankingOptions>(
     builder.Configuration.GetSection(RankingOptions.SectionName));
 builder.Services.AddScoped<IRankingAndWarningService, RankingAndWarningService>();
 builder.Services.AddHostedService<IncidentExpirationWorker>();
-builder.Services.AddScoped<IIncidentMergingService, IncidentMergingService>();
 builder.Services.AddHostedService<ReportProcessingWorker>();
 builder.Services.AddHttpClient<IAiExtractionService, AiExtractionService>(c =>
 {
@@ -31,13 +30,6 @@ builder.Services.AddHttpClient<IAiExtractionService, AiExtractionService>(c =>
         builder.Configuration.GetValue("AiExtraction:TimeoutSeconds", 30));
 });
 
-builder.Services.AddHttpClient<IAiExplanationService, AiExplanationService>(c =>
-{
-    c.BaseAddress = new Uri(builder.Configuration["AiExplanation:BaseUrl"]
-        ?? builder.Configuration["AiExtraction:BaseUrl"]!);
-    c.Timeout = TimeSpan.FromSeconds(
-        builder.Configuration.GetValue("AiExplanation:TimeoutSeconds", 30));
-});
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowDashboard", policy =>
@@ -46,20 +38,12 @@ builder.Services.AddCors(options =>
               .AllowAnyMethod());
 });
 
-builder.Services.AddScoped<IIncidentMergingService, IncidentMergingService>();
 builder.Services.AddHttpClient<IPredictionService, PredictionService>(c =>
 {
     c.BaseAddress = new Uri(builder.Configuration["PredictionService:BaseUrl"]!);
     c.Timeout = TimeSpan.FromSeconds(
         builder.Configuration.GetValue("PredictionService:TimeoutSeconds", 20));
 });
-// builder.Services.AddHttpClient<IAiExplanationService, AiExplanationService>(c =>
-// {
-//     c.BaseAddress = new Uri(builder.Configuration["AiExplanation:BaseUrl"]
-//         ?? builder.Configuration["AiExtraction:BaseUrl"]!);
-//     c.Timeout = TimeSpan.FromSeconds(
-//         builder.Configuration.GetValue("AiExplanation:TimeoutSeconds", 30));
-// });
 
 builder.Services.AddHttpClient<IAiExplanationService, AiExplanationService>((c, sp) =>
 {

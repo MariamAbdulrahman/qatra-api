@@ -1,9 +1,10 @@
 ﻿using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Qatra.Api.Data;          // عدّلي إن كان AppDbContext في namespace آخر
+using Qatra.Api.Data;
 using Qatra.Api.Interfaces;
 using Qatra.Api.Models;
+using Qatra.Api.Models.Enums;
 
 namespace Qatra.Api.Services;
 
@@ -48,8 +49,60 @@ public class PredictionService : IPredictionService
             .FirstOrDefaultAsync(n => n.Id == neighborhoodId, ct);
         if (hood is null) return null;
 
-        // 1) من الكاش (جدول Predictions) لتجنب إيقاظ الخدمة النائمة على Render
-        var cutoff = DateTime.UtcNow.AddMinutes(-_cacheMinutes);
+        var now = DateTime.UtcNow;
+
+        // 1) جمع الفواصل التاريخية لوصول الماء من WaterSupplyEvents (إن وُجدت)
+        var supplyDates = await _db.WaterSupplyEvents.AsNoTracking()
+            .Where(e => e.NeighborhoodId == hood.Id)
+            .OrderBy(e => e.EventDate)
+            .Select(e => e.EventDate)
+            .ToListAsync(ct);
+
+        var intervals = new List<double>();
+        for (int i = 1; i < supplyDates.Count; i++)
+        {
+            var prev = DateTime.SpecifyKind(supplyDates[i - 1], DateTimeKind.Utc);
+            var curr = DateTime.SpecifyKind(supplyDates[i], DateTimeKind.Utc);
+            var diffDays = (curr - prev).TotalDays;
+            if (diffDays > 0.1)
+                intervals.Add(Math.Round(diffDays, 2));
+        }
+
+        // 2) حساب daysSince الحقيقي من الحادثة المفتوحة للانقطاع أو آخر حدث وصول ماء
+        var openStatuses = new[] { IncidentStatus.New, IncidentStatus.Confirmed, IncidentStatus.InProgress };
+        var openOutage = await _db.Incidents.AsNoTracking()
+            .Where(i => i.NeighborhoodId == hood.Id
+                     && i.IssueType == IssueType.Outage
+                     && openStatuses.Contains(i.Status))
+            .OrderByDescending(i => i.LastReportAt)
+            .FirstOrDefaultAsync(ct);
+
+        double daysSince = 0;
+        DateTime? openOutageLastReportUtc = null;
+        if (openOutage is not null)
+        {
+            openOutageLastReportUtc = DateTime.SpecifyKind(openOutage.LastReportAt, DateTimeKind.Utc);
+            var createdUtc = DateTime.SpecifyKind(openOutage.CreatedAt, DateTimeKind.Utc);
+
+            if (openOutage.MaxDurationDays.HasValue && openOutage.MaxDurationDays.Value > 0)
+            {
+                var elapsedSinceLastReport = Math.Max(0, (now - openOutageLastReportUtc.Value).TotalDays);
+                daysSince = openOutage.MaxDurationDays.Value + elapsedSinceLastReport;
+            }
+            else
+            {
+                daysSince = Math.Max(0, (now - createdUtc).TotalDays);
+            }
+        }
+        else if (supplyDates.Count > 0)
+        {
+            var lastSupplyUtc = DateTime.SpecifyKind(supplyDates[^1], DateTimeKind.Utc);
+            daysSince = Math.Max(0, (now - lastSupplyUtc).TotalDays);
+        }
+        daysSince = Math.Round(daysSince, 1);
+
+        // 3) من الكاش (جدول Predictions) فقط إذا لم تتغير بيانات الأزمة أو daysSince بشكل مؤثر
+        var cutoff = now.AddMinutes(-_cacheMinutes);
         var cached = await _db.Predictions.AsNoTracking()
             .Where(p => p.NeighborhoodId == neighborhoodId && p.CreatedAt >= cutoff)
             .OrderByDescending(p => p.CreatedAt)
@@ -57,23 +110,37 @@ public class PredictionService : IPredictionService
 
         if (cached is not null && TryParse(cached.Outputs, out var cachedDetails))
         {
-            return new PredictionResult(neighborhoodId, "cache", cached.ModelVersion,
-                cached.CreatedAt, cachedDetails);
+            var cachedCreatedUtc = DateTime.SpecifyKind(cached.CreatedAt, DateTimeKind.Utc);
+            bool fresherThanIncident = openOutageLastReportUtc is null || cachedCreatedUtc >= openOutageLastReportUtc.Value;
+            bool sameDaysSince = TryGetCachedDaysSince(cached.Inputs, out var cachedDays)
+                                 && Math.Abs(cachedDays - daysSince) < 0.5;
+
+            if (fresherThanIncident && sameDaysSince)
+            {
+                return new PredictionResult(
+                    neighborhoodId,
+                    "cache",
+                    cached.ModelVersion,
+                    cachedCreatedUtc,
+                    cachedDetails);
+            }
         }
 
-        // 2) من خدمة Python
-        var since = DateTime.UtcNow.AddHours(-24);
+        // 4) من خدمة Python ML
+        var since = now.AddHours(-24);
         var recent = _db.Reports.AsNoTracking()
             .Where(r => r.NeighborhoodId == hood.Id && r.CreatedAt >= since);
 
         var reportsLast24h = await recent.CountAsync(ct);
         var activeDevices = await recent.Select(r => r.DeviceId).Distinct().CountAsync(ct);
+        if (openOutage is not null && openOutage.DistinctDevices > activeDevices)
+            activeDevices = openOutage.DistinctDevices;
 
         var request = new MlRequest(
             hood.PriorCycleDays,
             hood.PriorCycleSd,
-            new List<double>(),   // لا يوجد كشف لوصول الماء حالياً
-            0,                    // daysSince: نفس السبب
+            intervals,
+            daysSince,
             activeDevices,
             reportsLast24h);
 
@@ -106,23 +173,50 @@ public class PredictionService : IPredictionService
             _db.Predictions.Add(entity);
             await _db.SaveChangesAsync(ct);
 
-            return new PredictionResult(hood.Id, "model", version, entity.CreatedAt, details);
+            return new PredictionResult(
+                hood.Id,
+                "model",
+                version,
+                DateTime.SpecifyKind(entity.CreatedAt, DateTimeKind.Utc),
+                details);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested &&
                                    ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            // 3) احتياطي: لا نخزّنه، ليُعاد المحاولة مع أول طلب لاحق
+            // 5) احتياطي متوافق مع نفس عقد JSON: لا نخزّنه، ليُعاد المحاولة مع أول طلب لاحق
             _logger.LogWarning(ex, "Prediction service failed for neighborhood {Id}; using prior fallback.", hood.Id);
+
+            var margin = 1.645 * hood.PriorCycleSd;
+            var ciLow = Math.Round(Math.Max(1.0, hood.PriorCycleDays - margin), 1);
+            var ciHigh = Math.Round(hood.PriorCycleDays + margin, 1);
+            var isAbnormalFallback = daysSince > ciHigh;
 
             var fallback = JsonSerializer.SerializeToElement(new
             {
-                cycle_days = hood.PriorCycleDays,
-                cycle_sd = hood.PriorCycleSd,
-                note = "Estimated from the neighborhood's prior cycle only."
+                cycleMean = Math.Round(hood.PriorCycleDays, 1),
+                ci90 = new[] { ciLow, ciHigh },
+                probArrival2d = (double?)null,
+                probLate = isAbnormalFallback ? 1.0 : (double?)null,
+                abnormalDelay = isAbnormalFallback,
+                basis = "0 observations (Prior only)"
             });
 
             return new PredictionResult(hood.Id, "prior_fallback", "prior", DateTime.UtcNow, fallback);
         }
+    }
+
+    private static bool TryGetCachedDaysSince(string inputsJson, out double daysSince)
+    {
+        daysSince = 0;
+        if (!TryParse(inputsJson, out var el) || el.ValueKind != JsonValueKind.Object)
+            return false;
+
+        if (el.TryGetProperty("daysSince", out var prop) && prop.TryGetDouble(out var value))
+        {
+            daysSince = value;
+            return true;
+        }
+        return false;
     }
 
     private static bool TryParse(string json, out JsonElement element)
