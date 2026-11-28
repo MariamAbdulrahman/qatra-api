@@ -33,34 +33,53 @@ public class RankingAndWarningService : IRankingAndWarningService
         var incidents = await _db.Incidents
             .AsNoTracking()
             .Include(i => i.Neighborhood)
+            .Include(i => i.Reports)
             .Where(i => openStatuses.Contains(i.Status))
             .ToListAsync(ct);
 
         if (incidents.Count == 0) return [];
 
         var now = DateTime.UtcNow;
-        var scored = incidents.Select(i => (Incident: i, Score: ComputeScore(i, now))).ToList();
+        var scored = incidents.Select(i =>
+        {
+            var effectiveDuration = ComputeEffectiveDurationDays(i, now);
+            var score = ComputeScore(i, effectiveDuration, now);
+            return (Incident: i, EffectiveDuration: effectiveDuration, Score: score);
+        }).ToList();
 
-        // ترتيب تنازلي بالدرجة، urgent يتقدم عند التساوي
+        // القاعدة الذهبية: حالات الخطر الصحي العاجل تتصدر القائمة دائماً، ثم ترتيب تنازلي بالدرجة
         scored.Sort((a, b) =>
         {
-            int cmp = b.Score.CompareTo(a.Score);
-            if (cmp != 0) return cmp;
-            return b.Incident.UrgentHealth.CompareTo(a.Incident.UrgentHealth);
+            int urgentCmp = b.Incident.UrgentHealth.CompareTo(a.Incident.UrgentHealth);
+            if (urgentCmp != 0) return urgentCmp;
+            int scoreCmp = b.Score.CompareTo(a.Score);
+            if (scoreCmp != 0) return scoreCmp;
+            return b.Incident.DistinctDevices.CompareTo(a.Incident.DistinctDevices);
         });
 
         var result = new List<RankedIncident>(scored.Count);
         for (int i = 0; i < scored.Count; i++)
-            result.Add(await BuildRankedIncidentAsync(scored[i].Incident, scored[i].Score, i + 1, ct));
+        {
+            result.Add(await BuildRankedIncidentAsync(
+                scored[i].Incident,
+                scored[i].EffectiveDuration,
+                scored[i].Score,
+                i + 1,
+                ct));
+        }
 
         return result;
     }
 
     // ----------------------------------------------------------------
-    // بناء RankedIncident مع التنبؤ والتفسير
+    // بناء RankedIncident مع التنبؤ والتفسير والبلاغات المرتبطة
     // ----------------------------------------------------------------
     private async Task<RankedIncident> BuildRankedIncidentAsync(
-        Models.Incident incident, double score, int rank, CancellationToken ct)
+        Models.Incident incident,
+        int? effectiveDurationDays,
+        double score,
+        int rank,
+        CancellationToken ct)
     {
         var prediction = await _predictions.GetPredictionAsync(incident.NeighborhoodId, ct);
 
@@ -80,30 +99,63 @@ public class RankingAndWarningService : IRankingAndWarningService
 
         var input = new ExplanationInput(
             incident.Neighborhood.NameAr, incident.IssueType,
-            incident.DistinctDevices, incident.MaxDurationDays,
+            incident.DistinctDevices, effectiveDurationDays,
             incident.IsRepeat, incident.UrgentHealth,
             rank, cycleMean, probArrival2d, abnormalDelay, predictionBasis);
 
         var expl = await _explanation.ExplainAsync(input, ct);
 
+        var reports = incident.Reports
+            .OrderByDescending(r => r.CreatedAt)
+            .Select(r => new IncidentReportDto(
+                r.Id,
+                r.RawText,
+                r.IssueType ?? r.QuickButton,
+                r.DurationDays,
+                AsUtc(r.CreatedAt)))
+            .ToList();
+
         return new RankedIncident(
-            incident.Id, incident.NeighborhoodId, incident.Neighborhood.NameAr,
-            incident.IssueType, incident.Status, incident.DistinctDevices,
-            incident.MaxDurationDays, incident.IsRepeat, incident.UrgentHealth,
-            incident.LastReportAt, incident.CreatedAt,
-            Math.Round(score, 2), rank, expl.Text, expl.FromModel, prediction);
+            incident.Id,
+            incident.NeighborhoodId,
+            incident.Neighborhood.NameAr,
+            incident.IssueType,
+            incident.Status,
+            incident.DistinctDevices,
+            effectiveDurationDays,
+            incident.IsRepeat,
+            incident.UrgentHealth,
+            AsUtc(incident.LastReportAt),
+            AsUtc(incident.CreatedAt),
+            Math.Round(score, 2),
+            rank,
+            expl.Text,
+            expl.FromModel,
+            prediction,
+            reports);
+    }
+
+    // ----------------------------------------------------------------
+    // المدة الفعلية للانقطاع = المدة المبلَّغ عنها + الأيام المنقضية منذ آخر بلاغ
+    // ----------------------------------------------------------------
+    private static int? ComputeEffectiveDurationDays(Models.Incident incident, DateTime now)
+    {
+        if (!incident.MaxDurationDays.HasValue) return null;
+        var elapsedDays = (int)Math.Floor(Math.Max(0, (now - AsUtc(incident.LastReportAt)).TotalDays));
+        return incident.MaxDurationDays.Value + elapsedDays;
     }
 
     // ----------------------------------------------------------------
     // score = 100 * (w1*vol + w2*dur + w3*rec + w4*sev)
     // ----------------------------------------------------------------
-    private double ComputeScore(Models.Incident incident, DateTime now)
+    private double ComputeScore(Models.Incident incident, int? effectiveDurationDays, DateTime now)
     {
         double volume   = Math.Min(incident.DistinctDevices / 10.0, 1.0);
-        double duration = incident.MaxDurationDays.HasValue
-            ? Math.Min(incident.MaxDurationDays.Value / 7.0, 1.0) : 0.0;
-        double hoursSince = (now - incident.LastReportAt).TotalHours;
-        double recency  = Math.Max(1.0 - hoursSince / _opts.RecencyWindowHours, 0.0);
+        double duration = effectiveDurationDays.HasValue
+            ? Math.Min(effectiveDurationDays.Value / 7.0, 1.0) : 0.0;
+        double hoursSince = Math.Max(0, (now - AsUtc(incident.LastReportAt)).TotalHours);
+        // حد أدنى 0.35 للحداثة حتى لا تهبط الحوادث غير المحلولة لمجرد توقف التكرار
+        double recency  = Math.Max(1.0 - hoursSince / _opts.RecencyWindowHours, 0.35);
         double severity = incident.IssueType switch
         {
             IssueType.Contaminated => 1.0,
@@ -113,6 +165,9 @@ public class RankingAndWarningService : IRankingAndWarningService
         return 100.0 * (_opts.W1Volume * volume + _opts.W2Duration * duration
                       + _opts.W3Recency * recency + _opts.W4Severity * severity);
     }
+
+    private static DateTime AsUtc(DateTime value) =>
+        value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
     // ----------------------------------------------------------------
     // مساعدات JsonElement
